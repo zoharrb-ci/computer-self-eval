@@ -13,14 +13,34 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
         // --- Global Config ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // הגדרות אלו מיועדות לאירוח חיצוני כמו GitHub Pages. 
+        // החליפו את הערכים כאן בנתונים מה-Firebase Console שלכם:
+        const myFirebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'student-assessment-final';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'student-assessment-github';
 
         let currentUser = null;
         let currentResults = [];
+
+        // פונקציית עזר לניתוב הנתונים בהתאם לסביבה (GitHub מול סביבה פנימית)
+        const getAssessmentsCollection = () => {
+            if (typeof __app_id !== 'undefined') {
+                return collection(db, 'artifacts', appId, 'public', 'data', 'assessments');
+            }
+            // בסביבה חיצונית כמו גיטהאב, נשמור את הנתונים בתיקייה ראשית בשם assessments
+            return collection(db, 'assessments');
+        };
 
         // --- Questions Data ---
         const questionsByGrade = {
@@ -147,7 +167,7 @@
         };
 
         window.showShareInstructions = function() {
-            alert("שימו לב: מכיוון שהאפליקציה רצה כרגע בסביבת תצוגה מקדימה, לא ניתן לשתף את הקישור הישיר.\n\nכדי לשתף ב-Classroom עליכם:\n1. לשמור את הקוד כקובץ HTML.\n2. להעלות אותו לאתר חינמי כמו Tiiny.host או Netlify.\n3. לשתף את הקישור שייווצר שם עם התלמידים.");
+            alert("לאחר העלאת הקובץ ל-GitHub Pages או אירוח אחר, פשוט העתיקו את כתובת האתר שנוצרה (ה-URL) ושתפו אותה עם התלמידים דרך Classroom.");
         };
 
         window.exportToCSV = function() {
@@ -204,7 +224,8 @@
             };
 
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'assessments'), formData);
+                // שימוש בניתוב הדינאמי ל-Collection
+                await addDoc(getAssessmentsCollection(), formData);
                 document.getElementById('assessment-form').reset();
                 window.renderQuestions();
                 showMessage("כָּל הַכָּבוֹד! הַתְּשׁוּבוֹת שֶׁלְּךָ נִשְׁמְרוּ בְּהַצְלָחָה.", "success");
@@ -219,7 +240,7 @@
 
         function startListeningForResults() {
             if (!currentUser) return;
-            const assessmentsCol = collection(db, 'artifacts', appId, 'public', 'data', 'assessments');
+            const assessmentsCol = getAssessmentsCollection();
             onSnapshot(assessmentsCol, (snapshot) => {
                 const tableBody = document.getElementById('results-body');
                 if (!tableBody) return;
@@ -248,10 +269,14 @@
         // --- Init ---
 
         async function initAuth() {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Auth error:", e);
             }
         }
 
@@ -340,7 +365,7 @@
     </div>
 
     <!-- Teacher Button -->
-    <button type="button" onclick="window.toggleTeacherMode()" class="teacher-btn">🔐 כְּנִיסַת מוֹרֶה / שִׁיתּוּף</button>
+    <button type="button" onclick="window.toggleTeacherMode()" class="teacher-btn">🔐 כְּנִיסַת מוֹרֶה / נִיהוּל</button>
 
     <!-- Custom Password Modal -->
     <div id="password-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4 z-[70] backdrop-blur-sm">
@@ -368,7 +393,7 @@
             
             <div class="p-6 bg-sky-50 flex flex-col sm:flex-row gap-4 justify-center border-b items-center">
                 <button onclick="window.showShareInstructions()" class="bg-sky-700 hover:bg-sky-800 text-white py-3 px-6 rounded-2xl font-bold shadow-md flex items-center gap-2">
-                    <span class="text-lg">❓</span> אֵיךְ לְשַׁתֵּף?
+                    <span class="text-lg">❓</span> אֵיךְ לְשַׁתֵּף מִ-GitHub?
                 </button>
                 <button onclick="window.exportToCSV()" class="bg-green-600 hover:bg-green-700 text-white py-3 px-6 rounded-2xl font-bold shadow-md flex items-center gap-2">
                     <span class="text-lg">📊</span> הוֹרָדַת אֶקְסֶל
