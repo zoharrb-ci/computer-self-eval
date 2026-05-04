@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>הַעֲרָכָה עַצְמִית - מְיוּמָנוּיוֹת מַחְשֵׁב</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // --- Global Config ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'student-assessment-final';
+
+        let currentUser = null;
+        let currentResults = [];
+
+        // --- Questions Data ---
+        const questionsByGrade = {
+            'low': [
+                { id: 'q1', title: '1. הַדְלָקָה וְכִבּוּי', desc: 'אֲנִי יוֹדֵעַ לְהַדְלִיק אֶת הַמַּחְשֵׁב וּלְהִכָּנֵס לַתָּכְנִית הַנְּכוֹנָה.' },
+                { id: 'q2', title: '2. הַזָּזַת הָעַכְבָּר', desc: 'אֲנִי יוֹדֵעַ לְהָזִיז אֶת הָעַכְבָּר וְלִלְחוֹץ עַל כַּפְתּוֹרִים.' },
+                { id: 'q3', title: '3. כְּתִיבָה בַּמִּקְלֶדֶת', desc: 'אֲנִי יוֹדֵעַ לִמְצֹא אֶת הָאוֹתִיּוֹת שֶׁל הַשֵּׁם שֶׁלִּי בַּמִּקְלֶדֶת.' },
+                { id: 'q4', title: '4. צִיּוּר בַּמַּחְשֵׁב', desc: 'אֲנִי יוֹדֵעַ לְצַיֵּר צוּרוֹת וְלִצְבֹּעַ אוֹתָן.' },
+                { id: 'q5', title: '5. שְׁמִירַת עֲבוֹדָה', desc: 'אֲנִי יוֹדֵעַ אֵיךְ לִשְׁמֹר אֶת הַצִּיּוּר אוֹ הַמִּסְמָךְ שֶׁלִּי.' },
+                { id: 'q6', title: '6. כְּנִיסָה לְגוּגֶל', desc: 'אֲנִי יוֹדֵעַ לִפְתֹּחַ אֶת הָאִינְטֶרְנֶט וּלְחַפֵּשׂ מַשֶּׁהוּ.' },
+                { id: 'q7', title: '7. שִׁימושׁ בְּקַנְבָה', desc: 'אֲנִי יוֹדֵעַ לְהוֹסִיף תְּמוּנָה חֲמוּדָה לַדַּף שֶׁלִּי.' },
+                { id: 'q8', title: '8. הִתְנַהֲגוּת בָּרֶשֶׁת', desc: 'אֲנִי יוֹדֵעַ שֶׁלֹּא מְדַבְּרִים עִם אֲנָשִׁים שֶׁלֹּא מַכִּירִים.' },
+                { id: 'q9', title: '9. בַּקָּשַׁת עֶזְרָה', desc: 'אֲנִי יוֹדֵעַ לְבַקֵּשׁ עֶזְרָה כְּשֶׁמַּשֶּׁהוּ לֹא עוֹבֵד בַּמַּחְשֵׁב.' },
+                { id: 'q10', title: '10. הֲנָאָה מֵהַמַּחְשֵׁב', desc: 'אֲנִי אוֹהֵב לִלְמֹד דְּבָרִים חֲדָשִׁים עִם הַמַּחְשֵׁב.' }
+            ],
+            'mid': [
+                { id: 'q1', title: '1. הַקְלָדָה עִוֶּרֶת', desc: 'אֲנִי מַקְלִיד דֵּי מַהֵר בְּלִי לְחַפֵּשׂ כָּל אוֹת הַרְבֵּה זְמַן.' },
+                { id: 'q2', title: '2. גּוּגֶל דּוֹקְס (Docs)', desc: 'אֲנִי יוֹדֵעַ לְעַצֵּב טֶקְסְט, לְשַׁנּוֹת צֶבַע וְגֹדֶל שֶׁל אוֹתִיּוֹת.' },
+                { id: 'q3', title: '3. חִפּוּשׂ מֵידָע', desc: 'אֲנִי יוֹדֵעַ לִמְצֹא מֵידָע וּתְמוּנוֹת בְּגוּגֶל לָעֲבוֹדָה שֶׁלִּי.' },
+                { id: 'q4', title: '4. קַנְבָה - אֶלֵמֶנְטִים', desc: 'אֲנִי יוֹדֵעַ לְהוֹסִיף אֶלֵמֶנְטִים, מַסְגְּרוֹת וְרקָעִים בְּקַנְבָה.' },
+                { id: 'q5', title: '5. שִׁיתּוּף קְבָצִים', desc: 'אֲנִי יוֹדֵעַ לְשַׁתֵּף אֶת הַמּוֹרֶה בְּמִסְמָךְ הַגּוּגֶל שֶׁלִּי.' },
+                { id: 'q6', title: '6. דּוֹאַר אֶלֶקְטְרוֹנִי', desc: 'אֲנִי מֵבִין מָה זֶה מַייְל וְאֵיךְ לִשְׁלֹחַ הוֹדָעָה.' },
+                { id: 'q7', title: '7. זְכוּיוֹת יוֹצְרִים', desc: 'אֲנִי יוֹדֵעַ שֶׁלֹּא כָּל תְּמוּנָה בָּרֶשֶׁת מֻתָּר לָקַחַת.' },
+                { id: 'q8', title: '8. מֶגִּיק סְקוּל - הַכָּרָה', desc: 'אֲנִי יוֹדֵעַ שֶׁהַמַּחְשֵׁב יָכוֹל לַעֲזוֹר לִי לַחְשֹׁב עַל רַעְיוֹנוֹת.' },
+                { id: 'q9', title: '9. סֵדֶר בַּתִּיקִיּוֹת', desc: 'אֲנִי יוֹדֵעַ לְאַרְגֵּן אֶת הַקְּבָצִים שֶׁלִּי בְּגוּגֶל דְּרַייב.' },
+                { id: 'q10', title: '10. פְּתִירַת בְּעָיוֹת', desc: 'כְּשֶׁהַמַּחְשֵׁב נִתְקָע, אֲנִי מְנַסֶּה לְרַעֲנֵן אֶת הַדַּף (Refresh).' }
+            ],
+            'high': [
+                { id: 'q1', title: '1. עֲבוֹדָה שִׁיתּוּפִית', desc: 'אֲנִי יוֹדֵעַ לַעֲבֹד עִם חֲבֵרִים בְּיַחַד עַל אוֹתוֹ מִסְמָךְ גּוּגֶל.' },
+                { id: 'q2', title: '2. גּוּגֶל סְלַיידְס (Slides)', desc: 'אֲנִי יוֹדֵעַ לִבְנוֹת מַצֶּגֶת מְקְצוֹעִית עִם מַעֲבָרִים וַאֲנִימַצְיוֹת.' },
+                { id: 'q3', title: '3. קַנְבָה - עִיצוּב מִתְקַדֵּם', desc: 'אֲנִי יוֹדֵעַ לְהִשְׁתַּמֵּשׁ בִּשְׁכָבוֹת, קוֹמְבִּינַצְיוֹת צְבָעִים וְעִיצּוּב טֶקְסְט.' },
+                { id: 'q4', title: '4. מֶגִּיק סְקוּל - פְּרוֹמְפְּטִים', desc: 'אֲנִי יוֹדֵעַ לִכְתֹּב הַנְחָיָה מְדוּיֶקֶת לַ-AI כְּדֵי לְקַבֵּל תְּשׁוּבָה טוֹבָה.' },
+                { id: 'q5', title: '5. בִּקֹּרֶת מֵידָע', desc: 'אֲנִי יוֹדֵעַ לִבְדוֹק אִם מֵידָע שֶׁמָּצָאתִי בָּאִינְטֶרְנֶט הוּא אָמִין אוֹ "פֵייק".' },
+                { id: 'q6', title: '6. גּוּגֶל פוֹרְמְס (Forms)', desc: 'אֲנִי יוֹדֵעַ אֵיךְ לִבְנוֹת שְׁאֵלוֹן אוֹ לַעֲנוֹת עַל סֶקֶר מְמֻחְשָׁב.' },
+                { id: 'q7', title: '7. אֶבְטָחַת מֵידָע', desc: 'אֲנִי מֵבִין מָה זֶה "אִימּוּת דּוּ-שְׁלַבִּי" וְלָמָּה צָרִיךְ סִיסְמָה חֲזָקָה.' },
+                { id: 'q8', title: '8. מֶגִּיק סְקוּל - הַשְׁוָאָה', desc: 'אֲנִי יוֹדֵעַ לְהַשְׁווֹת בֵּין תְּשׁוּבוֹת שֶׁל AI לְבֵין מָה שֶׁאֲנִי חָשַׁבְתִּי.' },
+                { id: 'q9', title: '9. הַצָּגָה בִּפְנֵי קָהָל', desc: 'אֲנִי יוֹדֵעַ לְהַקְרִין אֶת הַמַּצֶּגֶת שֶׁלִּי וּלְדַבֵּר מוּל הַכִּיתָה.' },
+                { id: 'q10', title: '10. אֶתִיקָה דִּיגִיטָלִית', desc: 'אֲנִי מֵבִין אֶת הַהַשְׁפָּעָה שֶׁל הַמַּחְשֵׁב עַל הַחַיִּים וְעַל הַחֶבְרָה.' }
+            ]
+        };
+
+        // --- Core Functions Exposed to Window ---
+
+        window.updateLabel = function(id) {
+            const emojis = ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"];
+            const el = document.getElementById(id);
+            const valEl = document.getElementById(id + '-val');
+            if (el && valEl) valEl.innerText = emojis[el.value - 1];
+        };
+
+        window.renderQuestions = function() {
+            const grade = document.getElementById('grade').value;
+            let level = 'high';
+            if (['ב', 'ג'].includes(grade)) level = 'low';
+            else if (grade === 'ד') level = 'mid';
+
+            const container = document.getElementById('questions-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            questionsByGrade[level].forEach(q => {
+                const card = document.createElement('div');
+                card.className = 'question-card space-y-3 border-r-4 ' + getBorderColor(q.id);
+                card.innerHTML = `
+                    <div class="flex justify-between items-end">
+                        <label class="font-bold text-lg text-slate-800 vocalized text-right">${q.title}</label>
+                        <span id="${q.id}-val" class="text-xl">⭐⭐⭐</span>
+                    </div>
+                    <p class="text-sm text-slate-600 vocalized italic text-right">${q.desc}</p>
+                    <input type="range" id="${q.id}" min="1" max="5" value="3" oninput="window.updateLabel('${q.id}')" class="w-full">
+                `;
+                container.appendChild(card);
+            });
+        };
+
+        function getBorderColor(id) {
+            const n = parseInt(id.replace('q',''));
+            if (n <= 2) return 'border-slate-300';
+            if (n <= 4) return 'border-yellow-400';
+            if (n <= 7) return 'border-blue-400';
+            return 'border-purple-400';
+        }
+
+        function showMessage(text, type) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.innerText = text;
+            msgDiv.className = "p-4 rounded-2xl text-center font-bold mb-6 " + (type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200');
+            msgDiv.classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // --- Teacher Auth & Modal UI ---
+
+        window.toggleTeacherMode = function() {
+            const modal = document.getElementById('teacher-modal');
+            const passwordModal = document.getElementById('password-modal');
+            
+            if (!modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+            } else {
+                document.getElementById('teacher-password-input').value = '';
+                document.getElementById('password-error').classList.add('hidden');
+                passwordModal.classList.remove('hidden');
+                setTimeout(() => document.getElementById('teacher-password-input').focus(), 100);
+            }
+        };
+
+        window.closePasswordModal = function() {
+            document.getElementById('password-modal').classList.add('hidden');
+        };
+
+        window.checkPassword = function() {
+            const pass = document.getElementById('teacher-password-input').value;
+            if (pass === "1234") {
+                document.getElementById('password-modal').classList.add('hidden');
+                document.getElementById('teacher-modal').classList.remove('hidden');
+            } else {
+                document.getElementById('password-error').classList.remove('hidden');
+            }
+        };
+
+        window.closeTeacherModal = function() {
+            document.getElementById('teacher-modal').classList.add('hidden');
+        };
+
+        window.showShareInstructions = function() {
+            alert("שימו לב: מכיוון שהאפליקציה רצה כרגע בסביבת תצוגה מקדימה, לא ניתן לשתף את הקישור הישיר.\n\nכדי לשתף ב-Classroom עליכם:\n1. לשמור את הקוד כקובץ HTML.\n2. להעלות אותו לאתר חינמי כמו Tiiny.host או Netlify.\n3. לשתף את הקישור שייווצר שם עם התלמידים.");
+        };
+
+        window.exportToCSV = function() {
+            if (currentResults.length === 0) {
+                showMessage("אֵין נְתוּנִים לְיִצּוּא כָּרֶגַע.", "error");
+                window.closeTeacherModal();
+                return;
+            }
+            let csvContent = "\uFEFF"; 
+            csvContent += "שֵׁם,כִּיתָה,ממוצע,תאריך,ש1,ש2,ש3,ש4,ש5,ש6,ש7,ש8,ש9,ש10\n";
+            currentResults.forEach(data => {
+                const scores = data.scores || {};
+                const scoresArray = Object.values(scores).filter(v => v !== null);
+                const avg = scoresArray.length ? (scoresArray.reduce((a, b) => a + b, 0) / scoresArray.length).toFixed(1) : 0;
+                const date = data.timestamp?.toDate ? data.timestamp.toDate().toLocaleString('he-IL') : '';
+                const row = [data.firstName + " " + data.lastName, data.grade + "-" + data.classNum, avg, '"' + date + '"', scores.q1 || '', scores.q2 || '', scores.q3 || '', scores.q4 || '', scores.q5 || '', scores.q6 || '', scores.q7 || '', scores.q8 || '', scores.q9 || '', scores.q10 || ''].join(",");
+                csvContent += row + "\n";
+            });
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "תוצאות_הערכה_" + new Date().toLocaleDateString().replace(/\//g,'-') + ".csv";
+            link.click();
+        };
+
+        // --- Firebase Interaction ---
+
+        window.submitAssessment = async function(event) {
+            event.preventDefault();
+            if (!currentUser) {
+                showMessage("הַמַּעֲרֶכֶת עוֹד לֹא מוּכָנָה. אָנָּא הַמְתִּינוּ שְׁנִיָּה וְנַסּוּ שׁוּב.", "error");
+                return;
+            }
+
+            const btn = document.getElementById('submit-btn');
+            const loader = document.getElementById('loader');
+            btn.classList.add('hidden');
+            loader.classList.remove('hidden');
+
+            const scores = {};
+            for(let i=1; i<=10; i++) {
+                const el = document.getElementById('q' + i);
+                scores['q' + i] = el ? parseInt(el.value) : null;
+            }
+
+            const formData = {
+                firstName: document.getElementById('firstName').value,
+                lastName: document.getElementById('lastName').value,
+                grade: document.getElementById('grade').value,
+                classNum: document.getElementById('classNum').value,
+                scores: scores,
+                timestamp: serverTimestamp(),
+                userId: currentUser.uid
+            };
+
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'assessments'), formData);
+                document.getElementById('assessment-form').reset();
+                window.renderQuestions();
+                showMessage("כָּל הַכָּבוֹד! הַתְּשׁוּבוֹת שֶׁלְּךָ נִשְׁמְרוּ בְּהַצְלָחָה.", "success");
+            } catch (error) {
+                console.error("Submission error:", error);
+                showMessage("אופס, הָיְתָה תַּקָּלָה בַּשְּׁמִירָה. נַסּוּ שׁוּב מְאוּחָר יוֹתֵר.", "error");
+            } finally {
+                btn.classList.remove('hidden');
+                loader.classList.add('hidden');
+            }
+        };
+
+        function startListeningForResults() {
+            if (!currentUser) return;
+            const assessmentsCol = collection(db, 'artifacts', appId, 'public', 'data', 'assessments');
+            onSnapshot(assessmentsCol, (snapshot) => {
+                const tableBody = document.getElementById('results-body');
+                if (!tableBody) return;
+                tableBody.innerHTML = '';
+                currentResults = [];
+                snapshot.forEach(doc => currentResults.push(doc.data()));
+                currentResults.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+                
+                currentResults.forEach(data => {
+                    const scoresArray = Object.values(data.scores || {}).filter(v => v !== null);
+                    const avg = scoresArray.length ? scoresArray.reduce((a, b) => a + b, 0) / scoresArray.length : 0;
+                    const dateStr = data.timestamp?.toDate ? data.timestamp.toDate().toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'}) : '--:--';
+                    const row = document.createElement('tr');
+                    row.className = "border-b text-sm hover:bg-slate-50 transition-colors";
+                    row.innerHTML = `
+                        <td class="p-3 font-medium text-right">${data.firstName || ''} ${data.lastName || ''}</td>
+                        <td class="p-3 text-right">${data.grade || ''}-${data.classNum || ''}</td>
+                        <td class="p-3 font-bold text-sky-600 text-right">${avg.toFixed(1)} ⭐</td>
+                        <td class="p-3 text-xs text-slate-500 text-right">${dateStr}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }, (err) => console.error("Firestore Listener Error:", err));
+        }
+
+        // --- Init ---
+
+        async function initAuth() {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                const btn = document.getElementById('submit-btn');
+                if (btn) btn.disabled = false;
+                startListeningForResults();
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            window.renderQuestions();
+            const passInput = document.getElementById('teacher-password-input');
+            if (passInput) {
+                passInput.addEventListener('keypress', function (e) {
+                    if (e.key === 'Enter') window.checkPassword();
+                });
+            }
+        });
+
+        initAuth();
+
+    </script>
+
+    <style>
+        body { font-family: 'Assistant', sans-serif; background: #f0f9ff; min-height: 100vh; overflow-x: hidden; }
+        input[type="range"] { accent-color: #0ea5e9; cursor: pointer; }
+        .vocalized { line-height: 1.8; }
+        .question-card { background: white; padding: 1.25rem; border-radius: 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .teacher-btn { position: fixed; bottom: 20px; left: 20px; background: #e2e8f0; color: #475569; padding: 10px 20px; border-radius: 50px; font-size: 14px; font-weight: bold; z-index: 40; box-shadow: 0 4px 12px rgba(0,0,0,0.1); transition: all 0.2s; border: 2px solid #cbd5e1; cursor: pointer; }
+        .teacher-btn:hover { background: #0ea5e9; color: white; transform: scale(1.05); border-color: #0ea5e9; }
+    </style>
+</head>
+<body class="p-4 sm:p-8 text-right" dir="rtl">
+    <div class="max-w-2xl mx-auto">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 sm:p-10 border-t-8 border-sky-500">
+            <header class="text-center mb-8">
+                <div class="text-6xl mb-2">🚀</div>
+                <h1 class="text-3xl font-bold text-sky-900 mb-2 vocalized">מַסַּע הַמַּחְשֵׁבִים שֶׁלִּי</h1>
+                <p class="text-slate-600 font-semibold vocalized text-center">בַּחֲרוּ כִּיתָה וַעֲנוּ עַל הַשְּׁאֵלוֹת!</p>
+            </header>
+
+            <div id="message" class="hidden"></div>
+
+            <form id="assessment-form" onsubmit="window.submitAssessment(event)" class="space-y-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-sky-50 p-6 rounded-2xl border border-sky-100 text-right">
+                    <div class="space-y-1">
+                        <label class="block font-bold text-sky-800 text-sm vocalized">שֵׁם פְּרָטִי</label>
+                        <input type="text" id="firstName" required class="w-full p-3 rounded-xl border-none shadow-sm outline-none focus:ring-2 focus:ring-sky-300 text-right">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="block font-bold text-sky-800 text-sm vocalized">שֵׁם מִשְׁפָּחָה</label>
+                        <input type="text" id="lastName" required class="w-full p-3 rounded-xl border-none shadow-sm outline-none focus:ring-2 focus:ring-sky-300 text-right">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="block font-bold text-sky-800 text-sm vocalized">כִּיתָה</label>
+                        <select id="grade" required onchange="window.renderQuestions()" class="w-full p-3 rounded-xl border-none shadow-sm bg-white focus:ring-2 focus:ring-sky-300 text-right">
+                            <option value="ב">כִּיתָה בּ'</option>
+                            <option value="ג">כִּיתָה גֶּ'</option>
+                            <option value="ד">כִּיתָה דֶּ'</option>
+                            <option value="ה">כִּיתָה הֵ'</option>
+                            <option value="ו">כִּיתָה וָ'</option>
+                            <option value="ו2">כִּיתָה וָ'2 (חִנּוּךְ מְיוּחָד)</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <label class="block font-bold text-sky-800 text-sm vocalized">מִסְפַּר כִּיתָה</label>
+                        <input type="number" id="classNum" min="1" max="10" required class="w-full p-3 rounded-xl border-none shadow-sm focus:ring-2 focus:ring-sky-300 text-right">
+                    </div>
+                </div>
+
+                <div id="questions-container" class="space-y-4 text-right"></div>
+
+                <div class="pt-8 text-center">
+                    <button type="submit" id="submit-btn" disabled class="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold text-xl py-5 rounded-3xl shadow-lg transition-all active:scale-95 vocalized disabled:opacity-50">
+                        סִיַּמְתִּי! שְׁלַח לַמּוֹרֶה 🚀
+                    </button>
+                    <div id="loader" class="hidden flex justify-center py-4">
+                        <div class="animate-spin rounded-full h-10 w-10 border-b-4 border-sky-600"></div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Teacher Button -->
+    <button type="button" onclick="window.toggleTeacherMode()" class="teacher-btn">🔐 כְּנִיסַת מוֹרֶה / שִׁיתּוּף</button>
+
+    <!-- Custom Password Modal -->
+    <div id="password-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4 z-[70] backdrop-blur-sm">
+        <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden flex flex-col shadow-2xl p-6 text-center border-4 border-sky-200">
+            <h2 class="text-2xl font-bold text-sky-900 mb-2">אֵזוֹר מוֹרֶה</h2>
+            <p class="text-sm text-slate-600 mb-6">הַקְלִידוּ אֶת סִיסְמַת הַכְּנִיסָה (1234):</p>
+            <input type="password" id="teacher-password-input" class="w-full p-4 rounded-xl border-2 border-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none text-center text-xl tracking-widest mb-2 transition-all">
+            <div id="password-error" class="hidden text-red-500 text-sm font-bold mb-4 animate-pulse">סִיסְמָה שְׁגוּיָה! נַסּוּ שׁוּב.</div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="window.checkPassword()" class="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-xl font-bold shadow-md transition-transform active:scale-95">כְּנִיסָה</button>
+                <button onclick="window.closePasswordModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold shadow-sm transition-transform active:scale-95">בִּיטּוּל</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teacher Dashboard Modal -->
+    <div id="teacher-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border-4 border-sky-200">
+            <div class="p-6 border-b flex justify-between items-center bg-sky-600 text-white">
+                <button onclick="window.closeTeacherModal()" class="text-3xl hover:text-red-200 transition-colors">&times;</button>
+                <div class="text-right">
+                    <h2 class="text-xl font-bold">אֵזוֹר נִיהוּל</h2>
+                </div>
+            </div>
+            
+            <div class="p-6 bg-sky-50 flex flex-col sm:flex-row gap-4 justify-center border-b items-center">
+                <button onclick="window.showShareInstructions()" class="bg-sky-700 hover:bg-sky-800 text-white py-3 px-6 rounded-2xl font-bold shadow-md flex items-center gap-2">
+                    <span class="text-lg">❓</span> אֵיךְ לְשַׁתֵּף?
+                </button>
+                <button onclick="window.exportToCSV()" class="bg-green-600 hover:bg-green-700 text-white py-3 px-6 rounded-2xl font-bold shadow-md flex items-center gap-2">
+                    <span class="text-lg">📊</span> הוֹרָדַת אֶקְסֶל
+                </button>
+            </div>
+
+            <div class="overflow-y-auto p-4 flex-1">
+                <table class="w-full text-right border-collapse">
+                    <thead class="sticky top-0 bg-white">
+                        <tr class="bg-slate-100 text-slate-700 text-sm">
+                            <th class="p-3 border-b-2 text-right">תַּלְמִיד</th>
+                            <th class="p-3 border-b-2 text-right">כִּיתָה</th>
+                            <th class="p-3 border-b-2 text-right">מְמוּצָּע</th>
+                            <th class="p-3 border-b-2 text-right">זְמַן</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
